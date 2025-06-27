@@ -1,75 +1,341 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState } from "react";
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  Image,
+  Alert,
+  ScrollView,
+  ActivityIndicator,
+  Platform,
+} from "react-native";
+import { StatusBar } from "expo-status-bar";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import axios from "axios";
+import { API_CONFIG } from "../../config";
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+interface ApiResponse {
+  message: string;
+  output_file: string;
+}
 
 export default function HomeScreen() {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const pickImage = async () => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (permissionResult.granted === false) {
+        Alert.alert(
+          "Permission Required",
+          "Permission to access camera roll is required!"
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 1,
+      });
+
+      if (!result.canceled) {
+        setSelectedImage(result.assets[0].uri);
+        setProcessedImage(null);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to pick image");
+      console.error("Error picking image:", error);
+    }
+  };
+
+  const takePhoto = async () => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (permissionResult.granted === false) {
+        Alert.alert(
+          "Permission Required",
+          "Permission to access camera is required!"
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 1,
+      });
+
+      if (!result.canceled) {
+        setSelectedImage(result.assets[0].uri);
+        setProcessedImage(null);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to take photo");
+      console.error("Error taking photo:", error);
+    }
+  };
+
+  const removeBackground = async () => {
+    if (!selectedImage) {
+      Alert.alert("No Image", "Please select an image first");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const formData = new FormData();
+
+      if (Platform.OS === "web") {
+        const response = await fetch(selectedImage);
+        const blob = await response.blob();
+        formData.append("file", blob, "image.jpg");
+      } else {
+        formData.append("file", {
+          uri: selectedImage,
+          type: "image/jpeg",
+          name: "image.jpg",
+        } as any);
+      }
+
+      const response = await axios.post<ApiResponse>(
+        `${API_CONFIG.BASE_URL}/remove-background/`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          timeout: API_CONFIG.TIMEOUT,
+        }
+      );
+
+      if (response.data.output_file) {
+        const downloadUrl = `${API_CONFIG.BASE_URL}/download/${response.data.output_file}`;
+        setProcessedImage(downloadUrl);
+        Alert.alert("Success", "Background removed successfully!");
+      }
+    } catch (error: any) {
+      console.error("Error removing background:", error);
+      const errorMessage =
+        error.response?.data?.detail ||
+        "Failed to remove background. Please try again.";
+      Alert.alert("Error", errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadImage = async () => {
+    if (!processedImage) {
+      Alert.alert("Error", "No processed image to download");
+      return;
+    }
+
+    try {
+      if (Platform.OS === "web") {
+        const link = document.createElement("a");
+        link.href = processedImage;
+        link.download = "background_removed.png";
+        link.click();
+      } else {
+        const downloadResumable = FileSystem.createDownloadResumable(
+          processedImage,
+          FileSystem.documentDirectory + "background_removed.png"
+        );
+
+        const result = await downloadResumable.downloadAsync();
+        if (result?.uri) {
+          Alert.alert("Success", `Image saved to ${result.uri}`);
+        } else {
+          throw new Error("Download failed - no file URI returned");
+        }
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to download image");
+      console.error("Error downloading image:", error);
+    }
+  };
+
+  const resetApp = () => {
+    setSelectedImage(null);
+    setProcessedImage(null);
+    setLoading(false);
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <ScrollView contentContainerStyle={styles.container}>
+      <StatusBar style="auto" />
+
+      <View style={styles.header}>
+        <Text style={styles.title}>🎨 Background Remover</Text>
+        <Text style={styles.subtitle}>
+          Remove backgrounds from images using AI
+        </Text>
+      </View>
+
+      {!selectedImage && !processedImage && (
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.button} onPress={pickImage}>
+            <Text style={styles.buttonText}>📁 Choose from Gallery</Text>
+          </TouchableOpacity>
+
+          {Platform.OS !== "web" && (
+            <TouchableOpacity style={styles.button} onPress={takePhoto}>
+              <Text style={styles.buttonText}>📷 Take Photo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {selectedImage && (
+        <View style={styles.imageSection}>
+          <Text style={styles.sectionTitle}>Selected Image</Text>
+          <Image source={{ uri: selectedImage }} style={styles.image} />
+
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={removeBackground}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>✨ Remove Background</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={resetApp}>
+              <Text style={styles.secondaryButtonText}>🔄 Start Over</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#667eea" />
+          <Text style={styles.loadingText}>Processing your image...</Text>
+        </View>
+      )}
+
+      {processedImage && (
+        <View style={styles.imageSection}>
+          <Text style={styles.sectionTitle}>Background Removed</Text>
+          <Image source={{ uri: processedImage }} style={styles.image} />
+
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity style={styles.button} onPress={downloadImage}>
+              <Text style={styles.buttonText}>💾 Download Result</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={resetApp}>
+              <Text style={styles.secondaryButtonText}>🔄 Process Another</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flexGrow: 1,
+    backgroundColor: "#f5f7fa",
+    padding: 20,
+    alignItems: "center",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  header: {
+    alignItems: "center",
+    marginBottom: 30,
+    marginTop: 40,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  title: {
+    fontSize: 32,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+  },
+  buttonContainer: {
+    alignItems: "center",
+    marginVertical: 20,
+  },
+  button: {
+    backgroundColor: "#667eea",
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginVertical: 10,
+    minWidth: 200,
+    alignItems: "center",
+    boxShadow: "0px 2px 3.84px rgba(0, 0, 0, 0.25)",
+    elevation: 5,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+    pointerEvents: "none",
+  },
+  buttonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  secondaryButton: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginVertical: 10,
+    minWidth: 200,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#667eea",
+  },
+  secondaryButtonText: {
+    color: "#667eea",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  imageSection: {
+    alignItems: "center",
+    marginVertical: 20,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 15,
+  },
+  image: {
+    width: 300,
+    height: 300,
+    borderRadius: 15,
+    marginBottom: 20,
+    resizeMode: "contain",
+  },
+  loadingContainer: {
+    alignItems: "center",
+    marginVertical: 30,
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: "#666",
   },
 });
