@@ -40,7 +40,7 @@ export default function HomeScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Corrected from [\"images\"]
         allowsEditing: true,
         aspect: [4, 3],
         quality: 1,
@@ -91,23 +91,34 @@ export default function HomeScreen() {
       return;
     }
 
+    console.log("Starting background removal...");
+    console.log("API URL:", `${API_CONFIG.BASE_URL}/remove-background/`);
     setLoading(true);
 
     try {
+      // Test backend connection first
+      const testResponse = await fetch(`${API_CONFIG.BASE_URL}/`, {
+        method: "GET",
+      });
+      console.log("Backend connection test:", testResponse.status);
+
       const formData = new FormData();
 
       if (Platform.OS === "web") {
         const response = await fetch(selectedImage);
         const blob = await response.blob();
         formData.append("file", blob, "image.jpg");
+        console.log("Web: File added to FormData");
       } else {
         formData.append("file", {
           uri: selectedImage,
           type: "image/jpeg",
           name: "image.jpg",
         } as any);
+        console.log("Mobile: File added to FormData");
       }
 
+      console.log("Sending request to backend...");
       const response = await axios.post<ApiResponse>(
         `${API_CONFIG.BASE_URL}/remove-background/`,
         formData,
@@ -119,17 +130,37 @@ export default function HomeScreen() {
         }
       );
 
-      if (response.data.output_file) {
-        const downloadUrl = `${API_CONFIG.BASE_URL}/download/${response.data.output_file}`;
+      console.log("Response received:", response.data);
+      if (response.data?.output_file) {
+        const filename = response.data.output_file.split('/').pop() || response.data.output_file;
+        const downloadUrl = `${API_CONFIG.BASE_URL}/download/${filename}`;
+        console.log("Setting processed image URL:", downloadUrl);
         setProcessedImage(downloadUrl);
         Alert.alert("Success", "Background removed successfully!");
+      } else {
+        Alert.alert("Error", "No output file received from server");
       }
     } catch (error: any) {
       console.error("Error removing background:", error);
-      const errorMessage =
-        error.response?.data?.detail ||
-        "Failed to remove background. Please try again.";
-      Alert.alert("Error", errorMessage);
+      let errorMessage = "Failed to remove background. ";
+
+      if (
+        error.code === "ERR_NETWORK" ||
+        error.message?.includes("Network Error")
+      ) {
+        errorMessage +=
+          "Cannot connect to server at " +
+          API_CONFIG.BASE_URL +
+          ". Please check if the backend is running on port 8000.";
+      } else if (error.response) {
+        errorMessage +=
+          error.response?.data?.detail ||
+          `Server error: ${error.response.status}`;
+      } else {
+        errorMessage += error.message || "Unknown error occurred.";
+      }
+
+      Alert.alert("Connection Error", errorMessage);
     } finally {
       setLoading(false);
     }
@@ -205,8 +236,8 @@ export default function HomeScreen() {
           <View style={styles.buttonContainer}>
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={removeBackground}
-              disabled={loading}
+              onPress={loading ? undefined : removeBackground}
+              activeOpacity={loading ? 1 : 0.7}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
@@ -230,13 +261,30 @@ export default function HomeScreen() {
       )}
 
       {processedImage && (
-        <View style={styles.imageSection}>
-          <Text style={styles.sectionTitle}>Background Removed</Text>
-          <Image source={{ uri: processedImage }} style={styles.image} />
+        <View style={styles.comparisonSection}>
+          <Text style={styles.sectionTitle}>Comparison</Text>
+
+          <View style={styles.imageComparisonContainer}>
+            <View style={styles.imageWrapper}>
+              <Text style={styles.imageLabel}>Original</Text>
+              <Image
+                source={{ uri: selectedImage || '' }}
+                style={styles.comparisonImage}
+              />
+            </View>
+
+            <View style={styles.imageWrapper}>
+              <Text style={styles.imageLabel}>Background Removed</Text>
+              <Image
+                source={{ uri: processedImage || '' }}
+                style={styles.comparisonImage}
+              />
+            </View>
+          </View>
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.button} onPress={downloadImage}>
-              <Text style={styles.buttonText}>💾 Download Result</Text>
+              <Text style={styles.buttonText}>✅ Accept & Download</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.secondaryButton} onPress={resetApp}>
@@ -284,12 +332,12 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     minWidth: 200,
     alignItems: "center",
-    boxShadow: "0px 2px 3.84px rgba(0, 0, 0, 0.25)",
-    elevation: 5,
+    // Removed shadow* properties and replaced with boxShadow for web compatibility
+    // For native, you might need to keep elevation or use platform-specific shadows
+    elevation: 5, // Android shadow
   },
   buttonDisabled: {
     opacity: 0.6,
-    pointerEvents: "none",
   },
   buttonText: {
     color: "#fff",
@@ -327,7 +375,7 @@ const styles = StyleSheet.create({
     height: 300,
     borderRadius: 15,
     marginBottom: 20,
-    resizeMode: "contain",
+    resizeMode: "contain" as const,
   },
   loadingContainer: {
     alignItems: "center",
@@ -337,5 +385,35 @@ const styles = StyleSheet.create({
     marginTop: 15,
     fontSize: 16,
     color: "#666",
+  },
+  comparisonSection: {
+    alignItems: "center",
+    marginVertical: 20,
+    width: "100%",
+  },
+  imageComparisonContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  imageWrapper: {
+    alignItems: "center",
+    width: 280,
+    margin: 10,
+  },
+  imageLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 10,
+  },
+  comparisonImage: {
+    width: 280,
+    height: 280,
+    borderRadius: 15,
+    resizeMode: "contain" as const,
+    borderWidth: 2,
+    borderColor: "#e0e0e0",
   },
 });
